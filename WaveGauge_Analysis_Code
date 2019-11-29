@@ -1,0 +1,235 @@
+import numpy as np
+import matplotlib.pyplot as plt
+import scipy.signal
+from scipy.fftpack import fft
+from scipy.stats import chi2
+import pandas as pd
+from IPython.display import display
+%matplotlib inline
+
+# ----- PRELIMINARY CALCULATIONS -----
+# ------------------------------------
+
+# Import burst file and remove first row of headers
+
+headers = ['DateTime_RTC','Arduino_Millis','Depth','Analog_Pin','RTC_Millis']
+waves = pd.read_csv('C:\\Users\\krist\\Python_Projects\\Data\\Processed\\Test_Data_Jericho_September\\burstWAV5_Test.csv', skiprows=1, names=headers)
+
+burst = pd.DataFrame(waves)
+
+burst.plot('RTC_Millis','Depth')
+plt.title('Original Depth')
+
+# Convert sea surface height to pressure using the calculation formula from Arduino
+pg = 0.72064675
+
+burst.loc[:,'Pressure'] = burst.Depth/pg
+
+burst_depth = burst['Depth'].mean()
+print(burst_depth)
+
+# Detrend the time series
+detrend = scipy.signal.detrend(burst['Depth'], axis=-1, type='linear')
+burst.loc[:,'Depth'] = detrend
+
+
+# ----- PRESSURE CORRECTION USING ZERO CROSSING METHOD -----
+# ----------------------------------------------------------
+def zero_crossing(data,Fs):
+    # zero crossing analysis of wave data
+    # inputs  data: detrended time series of water elevation in m
+    #         Fs: sampling frequency of data in Hz
+    # outputs H_ind: individual wave heights in m (array)
+    #         T_ind: individual wave periods in m (array)
+    
+    # Preliminary Calculations
+    #time vector for water elevation [s]
+    time = np.linspace(0,(len(data)-1)/Fs,len(data))
+    # Before performing the analysis, we remove zero values. Why do we do this??
+    d0 = data[data !=0]
+    t0 = time[data !=0]
+    
+    # Zero Crossing Analysis
+    # we identify the indices at which surface elevation changes sign
+    crossing1 = np.squeeze(np.where(d0[0:-1]*d0[1:] < 0))
+    # if the elevation is negative at t=0, the first crossing is a zero upward crossing and is is rejected
+    if d0[0] < 0:
+        crossing2 = np.delete(crossing1,0)
+        crossing = crossing2[0::2]
+    else:
+        crossing = crossing1[0::2]   # these are the zero down crossings
+        
+    # Calculating Individual Wave Characteristics
+    
+    elevation_crest = np.zeros(len(crossing)-1)
+    elevation_trough = np.zeros(len(crossing)-1)
+    
+    if len(crossing)>=2:    # calculate wave period and height if at least one wave has been (text is cut off)
+        for i in range(len(crossing)-1):
+            elevation_crest[i] = np.max(d0[crossing[i]:crossing[i+1]])  # crest elevation
+            elevation_trough[1] = np.min(d0[crossing[i]:crossing[i+1]])  # trough elevation
+        T_ind = np.diff(t0[crossing])    # period = time difference between two succesive down crossings
+        H_ind = elevation_crest - elevation_trough  # individual wave height
+    else:  # if no waves, returns empty vectors
+        T_ind = []
+        H_ind = []
+    return H_ind, T_ind
+
+# ------------------------------------------
+# -----Converting Dataframe to 1D Array-----
+
+#convert dataframe to matrix
+conv_arr = burst.values
+
+# Split matrix into 1D arrays
+arr1 = np.delete(conv_arr,[1,2,3,4,5,6],axis=1)
+arr2 = np.delete(conv_arr,[0,2,3,4,5,6],axis=1) 
+arr3 = np.delete(conv_arr,[0,1,3,4,5,6],axis=1) 
+arr4 = np.delete(conv_arr,[0,1,2,4,5,6],axis=1)
+arr5 = np.delete(conv_arr,[0,1,2,3,5,6],axis=1)
+arr6 = np.delete(conv_arr,[0,1,2,3,4,6],axis=1)
+
+# converting into 1D array
+arr1 = arr1.ravel()
+arr2 = arr2.ravel()
+arr3 = arr3.ravel()
+arr4 = arr4.ravel()
+arr5 = arr5.ravel()
+arr6 = arr6.ravel()
+
+# ----- Calculate Wave Height and Wave Period
+data = arr3
+Fs = 40
+
+H_ind,T_ind = zero_crossing(data,Fs)
+
+# ------Calculate Wavenumber--------
+
+import matplotlib.pyplot as plt
+import numpy as np
+import sympy as sp
+
+%matplotlib inline
+
+omega = np.arange(2*np.pi/100, 2*np.pi/10, 2*np.pi/100)   # waves up to 10s period
+
+g = 9.8
+h = burst_depth   # water depth (average of burst)
+
+kp = np.sqrt(g*h) * omega[0]                  #kp is a guess for the solver, this assumes the first one is small
+for w in omega:
+    w2 = w**2
+    kk = sp.Symbol('kk')                      
+    f1 = g * kk * sp.tanh(kk *h) - w2        # this is the function 
+    k = sp.nsolve(f1, kk, kp)
+    kp = k
+    print (kp)
+
+# -----Calculate Pressure Response Factor-----
+
+ds = 0.08   # sensor depth in m...may need correction
+
+Kp = (sp.cosh(k*ds))/(sp.cosh(k*h))
+print(Kp)
+
+# ---------------------------------------------------
+# -----Calculate original water surface elevation-----
+
+# separate pressures into static pressure and dynamic pressure
+    # the correction factor only applies to dynamic pressure
+static_pressure = np.mean(arr6)
+dynamic_pressure = arr6 - static_pressure
+
+
+n = (1/Kp) * (dynamic_pressure*pg)
+water_level = static_pressure*pg
+
+n = n + water_level
+
+burst.loc[:,'Corrected_Depth'] = n
+
+#this is the detrended and corrected waves from dynamic pressure that are used later in the code for calculating zero crossings
+corrected_waves = dynamic_pressure*pg
+
+# -----------Calculate Wave Spectrum using corrected data
+
+def wave_spectrum(data,nfft,Fs):
+    '''Compute variance spectral density spectrum of the time-series and its 90% confidence intervals
+    The time-series is first divided into blocks of length nfft before being Fourier transformed
+    
+    INPUT
+        data   timeseries
+        nfft   block length
+        Fs     sampling frequency (Hz)
+        
+    OUTPUT
+        E   variance spectral density. If data is in metres, E is in m^2/Hz
+        f   frequency axis (Hz)
+        confLow and confUpper   lower and upper 90% confidence interval;
+                                (Multiplication factors for E) '''
+    
+    # Preliminary Calculations
+    n = len(data)     # length of the time-series
+    nfft = int(nfft - (nfft%2))  # the length of the window should be an even number
+    
+    data = scipy.signal.detrend(data)   # detrend the time series
+    nBlocks = int(n/nfft)   # number of blocks (use of int to make it an integer)
+    
+    data_new = data[0:nBlocks*nfft]   # we work only with the blocks which are complete
+    
+    # we organize the initial time series into blocks of length nfft
+    dataBlock = np.reshape(data_new,(nBlocks,nfft))  # each column of dataBlock is one block (cut off script)
+    
+    # Calculation of Variance Density Spectrum
+    
+    # definition frequency axis
+    df = Fs/nfft   # frequency resolution of the spectrum df = 1/[Duration of one block]
+    f = np.arange(0,Fs/2+df,df)  # frequency axis (Fs/2 = Fnyquist = max frequency)
+    fId = np.arange(0,len(f))
+    
+    # calculate the variance for each block and for each frequency
+    fft_data = fft(dataBlock,n = nfft,axis = 1)   # Fourier transform of the data
+    fft_data = fft_data[:,fId]    # only one sided
+    A = 2/nfft*np.real(fft_data)  # A(i,b) and B(i,b) contain the Fourier coefficient
+    B = 2/nfft*np.imag(fft_data)  # --See LH's book, page 325 for definition of (cut off text)
+                                  # /!\ assumes that mean(eta)=0
+        
+    E = (A**2 + B**2)/2           # E(i,b) = ai^2/2 = variance at frequency fi for (cut off text)
+    
+    # We finally average the variance over the blocks, and divide by df to get the variance density spectrum
+    E = np.mean(E, axis = 0)/df
+    
+    # Confidence Intervals
+    edf = round(nBlocks*2)  # degrees of freedom
+    alpha = 0.1             # calculation of the 90% confidence interval
+    
+    confLow = edf/chi2.ppf(1-alpha/2,edf)  # see explanations on confidence intervals given (cut off text)
+    confUpper = edf/chi2.ppf(alpha/2,edf)
+    
+    return E,f,confLow,confUpper
+
+data = n
+nfft = len(data)
+Fs = 40
+
+E,f,confLow,confUpper = wave_spectrum(data,nfft,Fs)
+
+# Calculating significant wave height and wave period for input into SWAN
+
+H_indCorrect, T_indCorrect = zero_crossing(corrected_waves,Fs)
+
+# calculation of significant wave height for corrected wave heights. Comparison to non-corrected is minimal.
+sorted_list = sorted(H_indCorrect, reverse=True)
+
+Hs = 0
+x = len(sorted_list)
+N = x/3
+
+for i in range(x//3):
+    Hs = Hs + sorted_list[i]
+
+Hs = Hs/N
+print(Hs)
+
+Tp = np.mean(T_indCorrect)
+print(Tp) 
