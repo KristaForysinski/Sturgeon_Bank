@@ -1,0 +1,240 @@
+  // code for wave gauges to measure waves at Sturgeon Bank
+
+#include <SPI.h>
+#include <SD.h>
+#include <Wire.h>
+#include "RTClib.h"
+
+RTC_PCF8523 RTC; // define Real Time Clock object
+
+float inputvoltagevalue = 0; //arduino in_pin value (0 to 1023)
+float gaugevoltage = 0; //pressure gauge voltage in mV
+float pressure = 0; // pressure in psi
+float depth = 0; // depth in metres of H2O
+
+//Gauge # 4
+int ardoffset = 0; // offset in 0-1023 measurement on pin
+int gaugeoffset = 40; // offset from 500 mV from pres transducer (which is supposed to be 0 psi), in mV
+
+long int time_stamp_log = 0;
+float time_stamp_load_1 = 0;
+float time_stamp_load_2 = 0;
+
+//int corr = 0;
+
+long int unixtimeatstart;
+float modunixtime;
+
+long int millisatstart = 0;
+
+long int y;
+long int x;
+
+long int startupcounter = 0;
+
+long int loadontime = 5000;
+long int loadofftime = 10000;
+bool load_on = false;
+
+float secondsandmillis = 0;
+
+int samperiod = 1000/40; //sampling period in ms. Regulated using the millis() function which counts ms since Arduino start. ***** << Divisor is sampling frequency in Hz >> ***** 
+
+int i; //counter for filename assignment
+
+//long int cycles = 0;
+
+const int IN_PIN = A2;
+const int LOAD_PIN = A3;
+const int LOAD_PIN_2 = A0
+;
+const int chipSelect = 10; // for data logging shield on Arduino Uno
+
+
+#define greenLEDpin 2
+#define redLEDpin 3
+
+DateTime now;
+
+void setup()
+{
+  pinMode (IN_PIN, INPUT);
+  pinMode(LOAD_PIN, OUTPUT) ;
+  pinMode(LOAD_PIN_2, OUTPUT) ; 
+  pinMode(10, OUTPUT);
+
+  pinMode(redLEDpin, OUTPUT);
+  pinMode(greenLEDpin, OUTPUT);
+  
+  //Serial.begin(19200);
+
+
+  SD.begin(chipSelect);
+
+  char filename[] = "WAVLOG00.CSV";
+  for (i = 0; i < 100; i++)
+  {
+
+    //Serial.print(F("testing "));
+    
+    filename[6] = i/10 + '0';
+    filename[7] = i%10 + '0';
+    if (! SD.exists(filename)) 
+    {
+      // only open a new file if it doesn't exist
+      logfile = SD.open(filename, FILE_WRITE); 
+      break;  // leave the loop!
+    }
+  }
+
+  //Serial.print(F("This is the Setup Loop! "));
+  //Serial.print(F("Logging to: "));
+  //Serial.print(filename);
+  //Serial.println();
+
+  Wire.begin();
+
+  digitalWrite(greenLEDpin, HIGH);
+  delay(2000);
+  digitalWrite(greenLEDpin, LOW);
+  delay(1000);
+  digitalWrite(greenLEDpin, HIGH);
+  delay(1000);
+  digitalWrite(greenLEDpin, LOW);
+  delay(500);
+  digitalWrite(redLEDpin, HIGH);
+  delay(500);
+  digitalWrite(redLEDpin, LOW);
+
+logfile.print("Gauge 1: RTC DateTime, Gauge 1: Arduino Millis, Gauge 1: Depth in Metres, Gauge 1: Analog Pin Value 0-1023");    // ***** remember to use correct Gauge ID Number here... for all 3 columns! *****
+logfile.println();
+
+
+// *** getting the loop to start right after a second switches over based on the RTC (which can only output time to the nearest second)
+
+while(1) {
+  
+  now = RTC.now();
+  x = now.second();
+  
+  delay(10);
+  
+  now = RTC.now();
+  y = now.second();
+  startupcounter++;
+
+  
+  if (y == (x+1)) 
+ {
+    now = RTC.now();
+    unixtimeatstart = now.unixtime();
+    
+    time_stamp_log = millis();
+    time_stamp_load_1 = millis();
+    time_stamp_load_2 = millis();
+
+    millisatstart = millis();
+    
+    break;
+ }
+}
+}
+
+
+// *** end of section for second correlation between RTC clock and Arduino millis.
+
+
+void loop ()
+{
+  // this first section deals with turning the additional load ON and OFF to maintain battery awakeness
+  
+  if (millis() >= time_stamp_load_1 + loadofftime)
+  {
+    time_stamp_load_2 = time_stamp_load_1 + loadofftime;
+    time_stamp_load_1 = millis();
+    analogWrite(LOAD_PIN, 255);
+    analogWrite(LOAD_PIN_2, 255);
+    load_on = true;
+    digitalWrite(redLEDpin, HIGH);
+    digitalWrite(greenLEDpin, HIGH);
+  }
+
+if (load_on == true && (millis() >= time_stamp_load_2 + loadontime))
+  {
+    analogWrite(LOAD_PIN, 0);
+    analogWrite(LOAD_PIN_2, 0);
+    load_on = false;
+    digitalWrite(redLEDpin, LOW);
+    digitalWrite(greenLEDpin, LOW);
+  }
+
+  // the real pressure logging business starts below:
+
+if (millis() >= time_stamp_log + samperiod) 
+{
+  time_stamp_log = millis();
+
+  inputvoltagevalue = analogRead(IN_PIN);
+  gaugevoltage = (inputvoltagevalue + ardoffset) / 1023 * 5000;
+  pressure = (((gaugevoltage - 500 + gaugeoffset) / 4000) * 5);
+  depth = pressure * 0.72064675;
+
+// density of sea water, Wikipedia, 
+// 1.025g/cm3
+// use factor of 0.72064675
+
+// fresh water:
+// 0.70307
+
+        
+// timestamp
+
+  now = RTC.now();
+
+  //secondsandmillis = (float)now.second() + ((float)(((time_stamp_log-millisatstart)%1000))/1000);
+
+  //secondsandmillis = (float)now.second() + (float)(((cycles)%((1000/samperiod)))*samperiod)/1000;
+
+  //modunixtime = (now.unixtime() - unixtimeatstart) + ((float)(((time_stamp_log-millisatstart)%1000))/1000); //version with millis from millis() - from Arduino - randomly appended to deconds from RTC
+  
+  //modunixtime = (now.unixtime() - unixtimeatstart) + (float)(((cycles)%((1000/samperiod)))*samperiod)/1000;
+
+  
+//This is where the logging to SD card part starts:
+
+  logfile.print(now.year(), DEC);
+  logfile.print("/");
+  logfile.print(now.month(), DEC);
+  logfile.print("/");
+  logfile.print(now.day(), DEC);
+  logfile.print(" ");
+  logfile.print(now.hour(), DEC);
+  logfile.print(":");
+  logfile.print(now.minute(), DEC);
+  logfile.print(":");
+  logfile.print(now.second(), DEC);
+  logfile.print(", ");    
+
+  logfile.print(time_stamp_log-millisatstart); 
+  logfile.print(", ");
+  
+  logfile.print(depth,3);
+  logfile.print(", ");
+
+  logfile.print(inputvoltagevalue,0);
+  logfile.println();
+
+  logfile.flush();
+
+// correction for slipping period: leave 1 ms slip so slip can be observed; if gets to 2 ms bring back down to zero by correcting period in main logging loop
+  
+
+  //digitalWrite(greenLEDpin, HIGH);
+  //delay(10);
+  //digitalWrite(greenLEDpin, LOW);
+
+  //delay(11);
+
+  //cycles++;
+}
+}
