@@ -10,7 +10,7 @@ CGRID REGULAR 484911 5443178 0 893 0 485803 5443178 CIRCLE 36 0.14 2.80 31
 
 $ INPGRID BOTTOM REGULAR [xpinp] [ypinp] [alpinp] [mxinp] [myinp] [dxinp] [dyinp]
 INPGRID BOTTOM REGULAR 484911 5443178 0 892 0 1 0
-READINP BOTTOM -1 'C:\Users\krist\ArcGIS_Projects\Processed_for_SWAN\ll5_bathy_CD.txt' 3 0 FREE
+READINP BOTTOM -1 '...\ll5_bathy_CD.txt' 3 0 FREE
 
 $ SET INPUT WAVE CONDITIONS
 BOUND SHAPESPEC JONSWAP 3.3 PEAK DSPR POWER
@@ -27,7 +27,7 @@ VEGETATION 0.326 0.02463 1 0.5
 
 $ INPGRID NPLANTS REGULAR [xpinp] [ypinp] [alpinp] [mxinp] [myinp] [dxinp] [dyinp]
 INPGRID NPLANTS REGULAR 484911 5443178 0 892 0 1 0
-READINP NPLANTS 1 'C:\Users\krist\MOHID_Projects\LL_1D_Transects\GD\DT\LL5_winter_veg_new.txt' 3 0 FREE
+READINP NPLANTS 1 '...\LL5_winter_veg.txt' 3 0 FREE
 
 FRICTION MADSEN 0.02
 
@@ -37,7 +37,7 @@ $ CURve ?sname? [xp1] [yp1] < [int] [xp] [yp] >
 $ [int] = nr of locations
 $ [xp].[yp] = corner points of curve
 CURVE  'curve5' 484911 5443178 892 485803 5443178
-TABLE  'curve5' HEAD   'C:\Users\krist\MOHID_Projects\LL_1D_Transects\GD\DT\Run57.txt' DEPTH HS TPS TMM10 DISSIP DISVEG
+TABLE  'curve5' HEAD   '...\Run57.txt' DEPTH HS TPS TMM10 DISSIP DISVEG
 
 COMPUTE
 STOP
