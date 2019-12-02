@@ -12,7 +12,7 @@ float gaugevoltage = 0; //pressure gauge voltage in mV
 float pressure = 0; // pressure in psi
 float depth = 0; // depth in metres of H2O
 
-//Gauge # 4
+//Gauge # 1
 int ardoffset = 0; // offset in 0-1023 measurement on pin
 int gaugeoffset = 40; // offset from 500 mV from pres transducer (which is supposed to be 0 psi), in mV
 
@@ -191,15 +191,6 @@ if (millis() >= time_stamp_log + samperiod)
 
   now = RTC.now();
 
-  //secondsandmillis = (float)now.second() + ((float)(((time_stamp_log-millisatstart)%1000))/1000);
-
-  //secondsandmillis = (float)now.second() + (float)(((cycles)%((1000/samperiod)))*samperiod)/1000;
-
-  //modunixtime = (now.unixtime() - unixtimeatstart) + ((float)(((time_stamp_log-millisatstart)%1000))/1000); //version with millis from millis() - from Arduino - randomly appended to deconds from RTC
-  
-  //modunixtime = (now.unixtime() - unixtimeatstart) + (float)(((cycles)%((1000/samperiod)))*samperiod)/1000;
-
-  
 //This is where the logging to SD card part starts:
 
   logfile.print(now.year(), DEC);
@@ -226,15 +217,5 @@ if (millis() >= time_stamp_log + samperiod)
 
   logfile.flush();
 
-// correction for slipping period: leave 1 ms slip so slip can be observed; if gets to 2 ms bring back down to zero by correcting period in main logging loop
-  
-
-  //digitalWrite(greenLEDpin, HIGH);
-  //delay(10);
-  //digitalWrite(greenLEDpin, LOW);
-
-  //delay(11);
-
-  //cycles++;
 }
 }
